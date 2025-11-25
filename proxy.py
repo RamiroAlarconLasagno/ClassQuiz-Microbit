@@ -12,10 +12,10 @@ from random import choice
 # ============================================================================
 # CONFIGURACION
 # ============================================================================
-PUERTO_SERIE = 'COM4'  # Cambiar segun sistema (COM3 Windows, /dev/ttyACM0 Linux)
+PUERTO_SERIE = 'COM4'
 BAUDRATE = 115200
 SERVIDOR_CLASSQUIZ = 'http://localhost:8000'
-GAME_PIN = '307726'
+GAME_PIN = '545191'
 
 NOMBRES_RANDOM = [
     "Luna", "Sol", "Estrella", "Cometa", "Nebulosa",
@@ -27,10 +27,11 @@ NOMBRES_RANDOM = [
 # ============================================================================
 # ESTADO GLOBAL
 # ============================================================================
-dispositivos = {}  # {device_id: {"nombre": str, "cliente": socketio.Client}}
+dispositivos = {}
 pregunta_actual = None
 tipo_pregunta_actual = None
 num_opciones_actual = 4
+opciones_actuales = []
 
 puerto_serial = None
 lock_serial = threading.Lock()
@@ -57,7 +58,7 @@ def enviar_usb(data):
         try:
             mensaje = json.dumps(data) + '\n'
             puerto_serial.write(mensaje.encode('utf-8'))
-            print(f"[USB→Conc] {data}")
+            print(f"[USB→Conc] ENVIADO: {data}")
         except Exception as e:
             print(f"[USB] Error enviando: {e}")
 
@@ -69,9 +70,16 @@ def leer_usb_loop():
     while True:
         try:
             if puerto_serial and puerto_serial.in_waiting:
+                bytes_disponibles = puerto_serial.in_waiting
+                print(f"[USB] {bytes_disponibles} bytes disponibles")
+                
                 linea = puerto_serial.readline().decode('utf-8').strip()
+                
                 if linea:
+                    print(f"[USB←Conc] RAW: {linea}")
                     procesar_mensaje_usb(linea)
+                else:
+                    print(f"[USB] Línea vacía")
         except Exception as e:
             print(f"[USB] Error leyendo: {e}")
             time.sleep(1)
@@ -82,14 +90,18 @@ def leer_usb_loop():
 def procesar_mensaje_usb(linea):
     """Procesa mensajes JSON desde el concentrador"""
     try:
+        print(f"[USB] Parseando JSON...")
         data = json.loads(linea)
         tipo = data.get('type')
+        
+        print(f"[USB] Tipo detectado: '{tipo}'")
+        print(f"[USB] Data completa: {data}")
         
         if tipo == 'discovery_start':
             print("\n[Descubrimiento] Iniciando...")
         
         elif tipo == 'debug':
-            print(f"[Debug] {data.get('msg')}")
+            print(f"[Debug-Concentrador] {data.get('msg')}")
         
         elif tipo == 'new_device':
             print(f"[Descubrimiento] Nuevo: {data['device_id'][:8]}")
@@ -100,8 +112,14 @@ def procesar_mensaje_usb(linea):
         elif tipo == 'discovery_end':
             print(f"[Descubrimiento] Completo: {data['total']} dispositivos\n")
         
+        elif tipo == 'qparams_sent':
+            print(f"[QPARAMS] Concentrador envió: tipo={data.get('q_type')}, opciones={data.get('num_options')}")
+        
         elif tipo == 'answer':
-            procesar_respuesta(data['device_id'], data['answer'])
+            device_id = data.get('device_id')
+            answer = data.get('answer')
+            print(f"[ANSWER] Recibido de {device_id[:8]}: '{answer}'")
+            procesar_respuesta(device_id, answer)
         
         elif tipo == 'polling_complete':
             print("[Polling] Completo\n")
@@ -113,10 +131,11 @@ def procesar_mensaje_usb(linea):
             print(f"[Ping] {nombre}: {status}")
         
         else:
-            print(f"[USB←Conc] {data}")
+            print(f"[USB] Mensaje no reconocido: {data}")
     
-    except json.JSONDecodeError:
-        print(f"[USB] JSON invalido: {linea}")
+    except json.JSONDecodeError as e:
+        print(f"[USB] JSON INVÁLIDO: {linea}")
+        print(f"[USB] Error: {e}")
     except Exception as e:
         print(f"[USB] Error procesando: {e}")
 
@@ -133,21 +152,17 @@ def registrar_dispositivos(lista_ids):
     
     for device_id in lista_ids:
         if device_id not in dispositivos:
-            # Generar nombre random
             nombre = f"{choice(NOMBRES_RANDOM)}_{device_id[-4:]}"
             
-            # Crear cliente Socket.IO
             cliente = socketio.Client()
             configurar_cliente_socketio(cliente, nombre, device_id)
             
-            # Guardar en diccionario
             dispositivos[device_id] = {
                 "nombre": nombre,
                 "cliente": cliente,
                 "conectado": False
             }
             
-            # Conectar en thread separado
             threading.Thread(
                 target=conectar_cliente,
                 args=(device_id,),
@@ -164,10 +179,13 @@ def conectar_cliente(device_id):
     nombre = info['nombre']
     
     try:
-        print(f"[Conectando] {nombre}...")
+        print(f"[Socket.IO] Conectando {nombre}...")
         cliente.connect(SERVIDOR_CLASSQUIZ)
-        # El handler connect() ejecutará join_game automáticamente
-        time.sleep(0.3)  # Pequeña pausa entre conexiones
+        
+        time.sleep(2.0)
+        
+        if not info.get('conectado'):
+            print(f"[⚠️] {nombre} - No recibió confirmación joined_game")
     
     except Exception as e:
         print(f"[Socket.IO] Error conectando {nombre}: {e}")
@@ -182,8 +200,7 @@ def configurar_cliente_socketio(cliente, nombre, device_id):
     
     @cliente.event
     def connect():
-        print(f"[Socket.IO] {nombre} conectado")
-        # Join game inmediatamente al conectar
+        print(f"[Socket.IO] {nombre} conectado - enviando join_game...")
         cliente.emit('join_game', {
             'username': nombre,
             'game_pin': GAME_PIN,
@@ -207,18 +224,17 @@ def configurar_cliente_socketio(cliente, nombre, device_id):
     
     @cliente.on('time_sync')
     def on_time_sync(data):
-        # CRITICO: Responder time_sync para validacion JWT
         cliente.emit('echo_time_sync', data)
     
     @cliente.on('set_question_number')
     def on_set_question(data):
-        # Solo el primer cliente procesa (evitar duplicados)
         if list(dispositivos.keys())[0] == device_id:
+            print(f"[ClassQuiz] Pregunta recibida por {nombre}")
             procesar_nueva_pregunta(data)
     
     @cliente.on('question_results')
     def on_results(data):
-        pass  # Silencioso
+        pass
     
     @cliente.on('final_results')
     def on_final(data):
@@ -239,40 +255,47 @@ def configurar_cliente_socketio(cliente, nombre, device_id):
 
 def procesar_nueva_pregunta(data):
     """Procesa pregunta recibida de ClassQuiz"""
-    global pregunta_actual, tipo_pregunta_actual, num_opciones_actual
+    global pregunta_actual, tipo_pregunta_actual, num_opciones_actual, opciones_actuales
     
     pregunta_actual = data.get('question_index', 0)
     question = data.get('question', {})
     
-    # Detectar tipo
     question_type = question.get('type', 'ABCD')
     if question_type == 'ABCD':
-        tipo_pregunta_actual = "unica"  # Asumimos unica por defecto
+        tipo_pregunta_actual = "unica"
     else:
         tipo_pregunta_actual = "multiple"
     
-    # Detectar numero de opciones
     answers = question.get('answers', [])
-    num_opciones_actual = len(answers)
+    opciones_actuales = [ans.get('answer', '') for ans in answers]
+    num_opciones_actual = len(opciones_actuales)
+    
     if num_opciones_actual < 2:
         num_opciones_actual = 4
+        opciones_actuales = ['Opcion A', 'Opcion B', 'Opcion C', 'Opcion D']
     
     print(f"\n[ClassQuiz] Pregunta {pregunta_actual}: {tipo_pregunta_actual}, {num_opciones_actual} opciones")
+    print(f"[ClassQuiz] Opciones: {opciones_actuales}")
     
     # Enviar parametros al concentrador
-    enviar_usb({
+    msg = {
         "type": "question_params",
         "q_type": tipo_pregunta_actual,
         "num_options": num_opciones_actual
-    })
+    }
+    print(f"[PROXY→USB] Enviando: {msg}")
+    enviar_usb(msg)
     
-    # Esperar 10 segundos para votacion
+    # Esperar 10 segundos
     print("[Votacion] Esperando 10 segundos...")
-    time.sleep(10)
+    for i in range(10, 0, -1):
+        print(f"[Votacion] {i}...")
+        time.sleep(1)
     
     # Iniciar polling
-    print("[Polling] Iniciando recoleccion...")
-    enviar_usb({"type": "start_poll"})
+    msg_poll = {"type": "start_poll"}
+    print(f"[PROXY→USB] Enviando: {msg_poll}")
+    enviar_usb(msg_poll)
 
 
 def procesar_respuesta(device_id, answer):
@@ -289,20 +312,34 @@ def procesar_respuesta(device_id, answer):
         print(f"[Warning] {nombre} no conectado")
         return
     
-    # Enviar a ClassQuiz
+    # Convertir letra a texto completo
+    if answer in ['A', 'B', 'C', 'D']:
+        indice = ord(answer) - ord('A')
+        
+        if 0 <= indice < len(opciones_actuales):
+            answer_text = opciones_actuales[indice]
+            print(f"[Mapeo] {nombre}: {answer} → '{answer_text}'")
+        else:
+            print(f"[Error] {nombre}: Índice {indice} fuera de rango")
+            return
+    
+    elif answer == "":
+        answer_text = ""
+        print(f"[Respuesta] {nombre}: (sin respuesta)")
+    
+    else:
+        answer_text = answer
+        print(f"[Respuesta] {nombre}: {answer_text}")
+    
     try:
         cliente.emit('submit_answer', {
             'question_index': pregunta_actual,
-            'answer': answer
+            'answer': answer_text
         })
-        
-        if answer:
-            print(f"[Respuesta] {nombre}: {answer}")
-        else:
-            print(f"[Respuesta] {nombre}: (vacio)")
+        print(f"[→ClassQuiz] {nombre}: Enviado ✓")
     
     except Exception as e:
-        print(f"[Error] Enviando respuesta {nombre}: {e}")
+        print(f"[Error] {nombre}: {e}")
 
 
 # ============================================================================
@@ -311,26 +348,23 @@ def procesar_respuesta(device_id, answer):
 
 def main():
     print("=" * 80)
-    print("PROXY MICROBIT-CLASSQUIZ")
+    print("PROXY MICROBIT-CLASSQUIZ (DEBUG MODE)")
     print("=" * 80)
     print(f"Servidor: {SERVIDOR_CLASSQUIZ}")
     print(f"Game PIN: {GAME_PIN}")
     print(f"Puerto: {PUERTO_SERIE}")
     print("=" * 80)
     
-    # Conectar USB
     if not conectar_serial():
         print("[Error] No se pudo conectar al concentrador")
         sys.exit(1)
     
-    # Iniciar thread de lectura USB
     thread_usb = threading.Thread(target=leer_usb_loop, daemon=True)
     thread_usb.start()
     
     print("\n[Esperando] Presiona Boton A en el concentrador para descubrir dispositivos")
     print("[Ctrl+C para salir]\n")
     
-    # Mantener vivo
     try:
         while True:
             time.sleep(1)

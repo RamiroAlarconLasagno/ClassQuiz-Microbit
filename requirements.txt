@@ -1,14 +1,14 @@
-# Requirements para Proxy Micro:bit - ClassQuiz
-
 # Comunicación serial USB
 pyserial>=3.5
 
-# Socket.IO client
-python-socketio[client]>=5.10.0
+# Socket.IO client (versiones estables y compatibles)
+python-socketio[client]==5.11.2
+python-engineio==4.9.0
 
 # Dependencias de Socket.IO
 requests>=2.31.0
 websocket-client>=1.6.0
 
-# Opcional: para desarrollo
-# python-dotenv>=1.0.0  # Para configuración con .env
+# Opcional: .env
+# python-dotenv>=1.0.0
+c

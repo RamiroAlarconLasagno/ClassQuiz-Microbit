@@ -15,7 +15,7 @@ from random import choice
 PUERTO_SERIE = 'COM4'
 BAUDRATE = 115200
 SERVIDOR_CLASSQUIZ = 'http://localhost:8000'
-GAME_PIN = '545191'
+GAME_PIN = '149206'
 
 NOMBRES_RANDOM = [
     "Luna", "Sol", "Estrella", "Cometa", "Nebulosa",

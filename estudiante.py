@@ -1,4 +1,4 @@
-# estudiante.py - Micro:bit Estudiante (DEBUG MODE)
+# estudiante.py - Micro:bit Estudiante (DEBUG MODE - Logica Botones Mejorada)
 
 from microbit import *
 import radio
@@ -19,6 +19,10 @@ num_opciones = 4
 opcion_actual = 0
 opcion_confirmada = None
 CONFIG_FILE = 'vote.cfg'
+
+# Estados de botones para deteccion de liberacion
+boton_a_estaba_presionado = False
+boton_b_estaba_presionado = False
 
 LETRAS = ['A', 'B', 'C', 'D']
 
@@ -257,37 +261,14 @@ tiempo_ultimo_boton = 0
 DEBOUNCE_MS = 200
 
 while True:
+    # Procesar mensajes radio
     msg = radio.receive()
     if msg:
         procesar_mensaje(msg)
     
     tiempo_actual = running_time()
     
-    # Boton A: Navegar DERECHA
-    if button_a.was_pressed() and not button_b.is_pressed():
-        if tiempo_actual - tiempo_ultimo_boton > DEBOUNCE_MS:
-            tiempo_ultimo_boton = tiempo_actual
-            log("=== BTN_A_presionado ===")
-            
-            if not registrado:
-                log("No_registrado, mostrando_ID")
-                mostrar_id_breve()
-            else:
-                mover_derecha()
-    
-    # Boton B: Navegar IZQUIERDA
-    if button_b.was_pressed() and not button_a.is_pressed():
-        if tiempo_actual - tiempo_ultimo_boton > DEBOUNCE_MS:
-            tiempo_ultimo_boton = tiempo_actual
-            log("=== BTN_B_presionado ===")
-            
-            if not registrado:
-                log("No_registrado, mostrando_ID")
-                mostrar_id_breve()
-            else:
-                mover_izquierda()
-    
-    # A+B JUNTOS: CONFIRMAR
+    # PRIORIDAD 1: Detectar A+B JUNTOS (al presionar)
     if button_a.is_pressed() and button_b.is_pressed():
         if tiempo_actual - tiempo_ultimo_boton > DEBOUNCE_MS:
             tiempo_ultimo_boton = tiempo_actual
@@ -298,8 +279,45 @@ while True:
             else:
                 log("No_registrado, ignorando_confirmacion")
             
+            # Esperar a que suelten ambos botones
             while button_a.is_pressed() or button_b.is_pressed():
                 sleep(50)
+            
+            # Limpiar estados
+            boton_a_estaba_presionado = False
+            boton_b_estaba_presionado = False
+    
+    # Boton A individual: detectar LIBERACION
+    elif boton_a_estaba_presionado and not button_a.is_pressed():
+        boton_a_estaba_presionado = False
+        if tiempo_actual - tiempo_ultimo_boton > DEBOUNCE_MS:
+            tiempo_ultimo_boton = tiempo_actual
+            log("=== BTN_A_soltado ===")
+            
+            if not registrado:
+                log("No_registrado, mostrando_ID")
+                mostrar_id_breve()
+            else:
+                mover_derecha()
+    
+    # Boton B individual: detectar LIBERACION
+    elif boton_b_estaba_presionado and not button_b.is_pressed():
+        boton_b_estaba_presionado = False
+        if tiempo_actual - tiempo_ultimo_boton > DEBOUNCE_MS:
+            tiempo_ultimo_boton = tiempo_actual
+            log("=== BTN_B_soltado ===")
+            
+            if not registrado:
+                log("No_registrado, mostrando_ID")
+                mostrar_id_breve()
+            else:
+                mover_izquierda()
+    
+    # Actualizar estados de presion
+    if button_a.is_pressed():
+        boton_a_estaba_presionado = True
+    if button_b.is_pressed():
+        boton_b_estaba_presionado = True
     
     # Logo: Mostrar estado actual
     if pin_logo.is_touched():

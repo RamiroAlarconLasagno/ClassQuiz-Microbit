@@ -169,9 +169,9 @@ def hacer_polling():
             radio.send("POLL:" + device_id)
             enviar_por_usb('{{"type":"debug","msg":"POLL_enviado"}}'.format(device_id[:8]))
             
-            # Esperar respuesta 500ms
-            tiempo_inicio = running_time()
-            while running_time() - tiempo_inicio < 500:
+            # Esperar respuesta 200ms - SOLO radio
+            # 4 iteraciones × 50ms = 200ms total
+            for _ in range(4):
                 mensaje = radio.receive()
                 if mensaje:
                     enviar_por_usb('{{"type":"debug","msg":"RX_radio:{}"}}'.format(mensaje))
@@ -182,7 +182,8 @@ def hacer_polling():
                             respuesta_recibida = partes[2] if len(partes) == 3 else ""
                             enviar_por_usb('{{"type":"debug","msg":"ANSWER_OK:{}"}}'.format(respuesta_recibida))
                             break
-                sleep(10)
+                
+                sleep(50)
             
             if respuesta_recibida is None:
                 enviar_por_usb('{{"type":"debug","msg":"Sin_respuesta_intento_{}"}}'.format(intentos + 1))

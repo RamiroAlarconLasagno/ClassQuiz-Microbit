@@ -1,0 +1,3 @@
+Analizar cuanto tarda un mensaje enviado por la microbit, que el random tenga en cuenta ese tiempo, de esa forma no se puede acoplar a medias o se acopla o no se acopla para nada
+Por ejemplo si el mensaje se envia en 50 ms y tenemos 2000 ms para hacer random que pueda ser 0, 50, 100 etc ya que si hacemos 35 50 se va a interrumpir el 35 con el 50 y es lo mismo que se acoplen al mismo tiempo.
+Cuando pasen 30 segundos del ack se podra recibir de nuevo el pedido REPORT

@@ -1,0 +1,283 @@
+/* style.css - Estilos personalizados */
+/* Sistema Proxy Microbit-ClassQuiz */
+
+/* ============================================================================
+   ESTILOS GENERALES
+   ============================================================================ */
+
+body {
+    background-color: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ============================================================================
+   LOGS
+   ============================================================================ */
+
+.log-container {
+    height: 500px;
+    overflow-y: auto;
+    background-color: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+.log-item {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    line-height: 1.5;
+}
+
+.log-item:last-child {
+    border-bottom: none;
+}
+
+/* Colores por nivel de log */
+.log-item.DEBUG {
+    color: #6c757d;
+    background-color: #f8f9fa;
+}
+
+.log-item.INFO {
+    color: #0d6efd;
+    background-color: #e7f3ff;
+}
+
+.log-item.ERROR {
+    color: #dc3545;
+    background-color: #ffe7e7;
+    font-weight: bold;
+}
+
+.log-item.WARNING {
+    color: #ffc107;
+    background-color: #fff8e1;
+}
+
+/* ============================================================================
+   TABLA DE DISPOSITIVOS
+   ============================================================================ */
+
+#dispositivos-table {
+    margin-bottom: 0;
+}
+
+#dispositivos-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+}
+
+.estado-online {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.estado-offline {
+    color: #dc3545;
+}
+
+.estado-registrado {
+    color: #ffc107;
+}
+
+.estado-desconectado {
+    color: #6c757d;
+}
+
+/* Input editable en tabla */
+.nombre-input {
+    border: none;
+    background: transparent;
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 0.95em;
+}
+
+.nombre-input:hover {
+    background-color: #f8f9fa;
+}
+
+.nombre-input:focus {
+    border: 1px solid #0d6efd;
+    background: white;
+    outline: none;
+    border-radius: 4px;
+}
+
+/* ============================================================================
+   PANEL DE PREGUNTA ACTIVA
+   ============================================================================ */
+
+#pregunta-panel {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#respuestas-list .list-group-item {
+    font-size: 0.95em;
+}
+
+/* ============================================================================
+   INDICADOR DE AUTO-SCROLL PAUSADO
+   ============================================================================ */
+
+.log-container.paused {
+    border: 2px solid #ffc107;
+    box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+}
+
+.log-container.paused::before {
+    content: "⏸ Auto-scroll pausado (5 segundos)";
+    display: block;
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 6px 12px;
+    margin: -10px -10px 10px -10px;
+    border-bottom: 1px solid #ffc107;
+    font-size: 0.85em;
+    font-weight: bold;
+}
+
+/* ============================================================================
+   NAVBAR
+   ============================================================================ */
+
+.navbar-brand {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+#status-badge {
+    font-size: 0.95rem;
+    padding: 8px 12px;
+}
+
+/* ============================================================================
+   CARDS
+   ============================================================================ */
+
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    border: 1px solid #e0e0e0;
+}
+
+.card-title {
+    color: #343a40;
+    font-weight: 600;
+}
+
+/* ============================================================================
+   BOTONES
+   ============================================================================ */
+
+.btn {
+    font-weight: 500;
+}
+
+.btn-sm {
+    padding: 4px 12px;
+    font-size: 0.875rem;
+}
+
+/* ============================================================================
+   FORMULARIOS
+   ============================================================================ */
+
+.form-label {
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 6px;
+}
+
+.form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+}
+
+.form-text {
+    font-size: 0.85em;
+    color: #6c757d;
+}
+
+/* ============================================================================
+   TABS
+   ============================================================================ */
+
+.nav-tabs .nav-link {
+    color: #495057;
+    font-weight: 500;
+}
+
+.nav-tabs .nav-link.active {
+    color: #0d6efd;
+    font-weight: 600;
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+
+@media (max-width: 768px) {
+    .navbar-brand {
+        font-size: 1rem;
+    }
+    
+    #status-badge {
+        font-size: 0.8rem;
+        padding: 6px 10px;
+    }
+    
+    .log-container {
+        height: 400px;
+    }
+    
+    .btn-sm {
+        padding: 3px 8px;
+        font-size: 0.8rem;
+    }
+}
+
+/* ============================================================================
+   ANIMACIONES
+   ============================================================================ */
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.pulse-animation {
+    animation: pulse 2s infinite;
+}
+
+/* ============================================================================
+   UTILIDADES
+   ============================================================================ */
+
+.text-monospace {
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}

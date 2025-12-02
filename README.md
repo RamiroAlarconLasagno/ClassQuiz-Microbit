@@ -1,238 +1,279 @@
-# Sistema Micro:bit + ClassQuiz
+# README.md - Sistema de Votación ClassQuiz con Micro:bit
 
-Sistema completo de votación con BBC micro:bit v2 integrado a ClassQuiz.
+## Descripción del Proyecto
 
-## Archivos
-
-- `estudiante.py` - Programa para micro:bit de estudiantes
-- `concentrador.py` - Programa para micro:bit concentrador (conectado a PC)
-- `proxy.py` - Programa Python para PC (puente USB-ClassQuiz)
+Sistema de votación distribuida para educación que integra dispositivos **BBC micro:bit** con la plataforma web **ClassQuiz**. Permite a estudiantes participar en quizzes interactivos usando hardware físico en lugar de navegadores web.
 
 ---
 
-## Requisitos
+## Arquitectura del Sistema
 
-### Hardware
-- 1 micro:bit v2 (concentrador) + cable USB
-- N micro:bits v2 (estudiantes)
-- Todos configurados en **canal de radio 7**
-
-### Software PC
-```bash
-pip install pyserial python-socketio[client] requests websocket-client
+```
+┌─────────────┐     Radio      ┌──────────────┐
+│ Micro:bit   │ ◄────────────► │ Micro:bit    │
+│ Estudiante  │     2.4GHz     │ Concentrador │
+└─────────────┘                └──────┬───────┘
+                                      │ USB-UART
+                                      ▼
+                               ┌──────────────┐
+                               │ Proxy Python │
+                               │ (PC/Netbook) │
+                               └──────┬───────┘
+                                      │ Socket.IO
+                                      ▼
+                               ┌──────────────┐
+                               │  ClassQuiz   │
+                               │   Backend    │
+                               └──────────────┘
 ```
 
-O si prefieres un archivo requirements.txt:
-```bash
-pip install -r requirements.txt
+### Componentes
+
+**1. Estudiante (estudiante.py)**
+- Ejecuta en micro:bit de cada alumno
+- Navegación de opciones con botones A/B
+- Confirmación de voto con A+B simultáneo
+- Display muestra opción actual (A/B/C/D)
+- Comunicación por radio con concentrador
+
+**2. Concentrador (concentrador.py)**
+- Ejecuta en micro:bit USB conectado a PC
+- Coordina hasta 30+ dispositivos estudiante
+- Protocolo discovery para registro automático
+- Polling secuencial para evitar colisiones
+- Bridge USB-UART ↔ Radio
+
+**3. Proxy (proxy.py)**
+- Ejecuta en PC/netbook del docente
+- Cliente Socket.IO multi-instancia
+- Mapeo device_id → username ClassQuiz
+- Traducción de protocolos micro:bit ↔ ClassQuiz
+
+---
+
+## Protocolo de Comunicación
+
+### Radio (Micro:bit ↔ Micro:bit)
+
+**Formato CSV:** `COMANDO:parametro1:parametro2`
+
+| Comando | Dirección | Payload | Propósito |
+|---------|-----------|---------|-----------|
+| `REPORT` | Conc → Est | - | Solicitar registro |
+| `ACK:device_id` | Est → Conc | device_id | Respuesta registro |
+| `QPARAMS:tipo:num` | Conc → Est | tipo, opciones | Configurar pregunta |
+| `POLL:device_id` | Conc → Est | device_id | Solicitar voto |
+| `ANSWER:id:opcion` | Est → Conc | device_id, voto | Enviar respuesta |
+
+### USB-UART (Micro:bit ↔ PC)
+
+**Formato JSON** (tolerante a espacios):
+
+```json
+{
+  "type": "question_params",
+  "q_type": "unica",
+  "num_options": 4
+}
+```
+
+```json
+{
+  "type": "answer",
+  "device_id": "1d4a339694f35219",
+  "answer": "C"
+}
+```
+
+### Socket.IO (Proxy ↔ ClassQuiz)
+
+Eventos estándar ClassQuiz:
+- `join_game` - Registro con username único
+- `set_question_number` - Recepción de pregunta
+- `submit_answer` - Envío de respuesta
+- `question_results` - Feedback de resultado
+
+---
+
+## Flujo de Votación
+
+```
+1. DOCENTE inicia quiz en ClassQuiz web
+   ↓
+2. PROXY recibe evento "set_question_number"
+   ↓
+3. PROXY envía por USB: question_params
+   ↓
+4. CONCENTRADOR broadcast radio: QPARAMS:unica:4
+   ↓
+5. ESTUDIANTE resetea voto, habilita botones A/B
+   ↓
+6. ALUMNO navega opciones (A→B→C→D) y confirma (A+B)
+   ↓
+7. PROXY envía por USB: start_poll
+   ↓
+8. CONCENTRADOR hace polling: POLL:device_id_1, POLL:device_id_2...
+   ↓
+9. ESTUDIANTE responde: ANSWER:1d4a339694f35219:C
+   ↓
+10. CONCENTRADOR reenvía USB: {"type":"answer"...}
+    ↓
+11. PROXY mapea device_id → username y envía Socket.IO
+    ↓
+12. CLASSQUIZ procesa voto y muestra resultado
 ```
 
 ---
 
-## Instalación
+## Instalación y Uso
 
-### 1. Instalar dependencias Python
+### Requisitos
 
-**Crear entorno virtual (recomendado):**
+**Hardware:**
+- 1 micro:bit v2 (concentrador)
+- N micro:bits v2 (estudiantes, máx ~30)
+- Cable USB micro:bit ↔ PC
+- PC/Netbook con Python 3.8+
+
+**Software:**
+- Python 3.8+
+- Librerías: `pyserial`, `python-socketio[client]`, `requests`
+- Editor Mu o MakeCode para flashear micro:bits
+
+### Instalación
+
+1. **Instalar dependencias Python:**
 ```bash
-python -m venv venv
-
-# Windows:
-venv\Scripts\activate
-
-# Linux/Mac:
-source venv/bin/activate
+pip install pyserial python-socketio requests websocket-client
 ```
 
-**Instalar paquetes:**
-```bash
-pip install -r requirements.txt
-```
+2. **Flashear micro:bits:**
+   - `estudiante.py` → Todos los micro:bits de alumnos
+   - `concentrador.py` → Micro:bit conectado a USB
 
-### 2. Programar micro:bits
-
-**Concentrador:**
-- Cargar `concentrador.py` en el micro:bit que estará conectado a PC por USB
-- Este actúa como hub entre estudiantes y computadora
-
-**Estudiantes:**
-- Cargar `estudiante.py` en todos los micro:bits de estudiantes  
-- Pueden funcionar con baterías (no necesitan USB)
-
-**Nota:** Usar editor online (python.microbit.org) o Mu Editor para cargar los programas.
-
-### 3. Configurar proxy.py
-
-Editar estas líneas según tu sistema:
-
+3. **Configurar proxy:**
 ```python
-PUERTO_SERIE = 'COM3'  # Windows: COM3, Linux: /dev/ttyACM0, Mac: /dev/tty.usbmodem*
-SERVIDOR_CLASSQUIZ = 'http://localhost:8000'
-GAME_PIN = '641568'  # PIN del juego ClassQuiz
+# En proxy.py
+SERIAL_PORT = "COM3"  # o /dev/ttyACM0 en Linux
+GAME_PIN = "123456"
+CLASSQUIZ_URL = "https://classquiz.example.com"
 ```
 
----
-
-## Uso
-
-### Paso 0: Instalar dependencias Python
-```bash
-# Opción A: Instalación directa
-pip install pyserial python-socketio[client] requests websocket-client
-
-# Opción B: Usar requirements.txt (recomendado)
-pip install -r requirements.txt
-```
-
-### Paso 1: Iniciar ClassQuiz
-Crear un juego y obtener el PIN.
-
-### Paso 2: Descubrir dispositivos
+4. **Ejecutar sistema:**
 ```bash
 python proxy.py
 ```
 
-Presionar **Botón A** en el concentrador:
-- Envía señal REPORT durante 12 segundos
-- Micro:bits estudiantes responden con su ID
-- El proxy crea un cliente Socket.IO por cada estudiante
-- Todos se unen automáticamente al juego
+### Uso en Clase
 
-**Confirmación:** Display del concentrador muestra cantidad detectada.
-
-### Paso 3: Iniciar juego en ClassQuiz
-Los estudiantes aparecen como "Luna_abc1", "Estrella_def2", etc.
-
-### Paso 4: Durante preguntas
-
-**Automático:**
-1. ClassQuiz envía pregunta → proxy detecta evento
-2. Proxy envía parámetros al concentrador por USB
-3. Concentrador hace broadcast radio → todos los estudiantes
-4. Estudiantes ven ícono (❤ única, ▢ múltiple)
-
-**Estudiante vota (10 segundos):**
-- **Botón A:** Cicla opciones A → B → C → D
-- **Botón B:** Guarda respuesta
-  - Única: reemplaza anterior
-  - Múltiple: toggle (agrega/quita)
-
-**Recolección:**
-5. Tras 10s, proxy envía comando `start_poll`
-6. Concentrador pregunta uno por uno (POLL)
-7. Cada estudiante responde cuando escucha su ID
-8. Concentrador envía respuestas por USB
-9. Proxy traduce a ClassQuiz vía Socket.IO
+1. Docente crea quiz en ClassQuiz web
+2. Inicia juego y obtiene PIN
+3. Configura PIN en proxy.py
+4. Ejecuta `python proxy.py`
+5. Proxy registra automáticamente todos los micro:bits
+6. Docente inicia pregunta
+7. Alumnos votan con botones
+8. Resultados se muestran en ClassQuiz
 
 ---
 
-## Protocolo Radio
+## Características Técnicas
 
-| Mensaje | Origen | Destino | Descripción |
-|---------|--------|---------|-------------|
-| `REPORT` | Concentrador | Broadcast | Inicia descubrimiento |
-| `ID:abc123` | Estudiante | Concentrador | Responde con ID único |
-| `ACK:abc123` | Concentrador | Estudiante | Confirma registro |
-| `QPARAMS:multiple:3` | Concentrador | Broadcast | Tipo y opciones de pregunta |
-| `POLL:abc123` | Concentrador | Estudiante | Solicita respuesta |
-| `ANSWER:abc123:A,C` | Estudiante | Concentrador | Envía respuesta |
-| `PING:abc123` | Concentrador | Estudiante | Verifica estado |
-| `PONG:abc123` | Estudiante | Concentrador | Confirma online |
+### Gestión de Colisiones Radio
+
+Sistema de dos fases para evitar colisiones entre 30+ dispositivos:
+
+**Fase 1: Discovery (aleatorio con ACK)**
+- Concentrador broadcast `REPORT` cada 100ms
+- Estudiantes responden con delay aleatorio 0-2000ms
+- Concentrador envía ACK confirmando registro
+- Estudiante solo se registra tras recibir ACK
+
+**Fase 2: Polling (secuencial)**
+- Concentrador itera device_ids registrados
+- Envía `POLL:device_id` específico
+- Solo el estudiante con ese ID responde
+- 0% colisiones garantizadas
+
+### Optimizaciones de Memoria
+
+Micro:bit v2 tiene **128KB RAM**, pero MicroPython consume ~100KB:
+
+- Mensajes radio máx 32 bytes (default) o 64 (config)
+- CSV en lugar de JSON: `"A,B,C"` vs `{"a":"A","b":"B"}`
+- Sin f-strings: usar `.format()` o concatenación
+- Device ID hexadecimal: `''.join(['{:02x}'.format(b) for b in machine.unique_id()])`
+
+### Tolerancia a Reseteos
+
+Estudiantes pierden estado al presionar botón reset:
+- Device ID se recalcula (machine.unique_id() = hardware ID)
+- Responden a siguiente `REPORT` broadcast
+- Proxy mantiene mapeo persistente device_id → username
 
 ---
 
-## Protocolo USB (JSON)
+## Archivos del Proyecto
 
-**PC → Concentrador:**
-```json
-{"type":"question_params", "q_type":"multiple", "num_options":3}
-{"type":"start_poll"}
 ```
-
-**Concentrador → PC:**
-```json
-{"type":"discovery_start"}
-{"type":"debug", "msg":"REPORT_ENVIADO:ronda_1"}
-{"type":"new_device", "device_id":"abc123"}
-{"type":"device_list", "devices":["abc123","def456"]}
-{"type":"discovery_end", "total":2}
-{"type":"answer", "device_id":"abc123", "answer":"B"}
-{"type":"polling_complete"}
-{"type":"ping_result", "device_id":"abc123", "status":"online"}
+/
+├── estudiante.py          # Firmware micro:bit alumno
+├── concentrador.py        # Firmware micro:bit USB
+├── proxy.py               # Servicio Python PC
+├── README.md              # Este archivo
+├── informe_errores_microbit_uart.md  # Debugging guide
+└── arquitectura-completa-microbit-classquiz.mermaid
 ```
 
 ---
 
-## Troubleshooting
+## Limitaciones Conocidas
 
-**Problema:** Puerto serie no detectado
-```bash
-# Linux: verificar permisos
-sudo usermod -a -G dialout $USER
-# Reiniciar sesión
-
-# Windows: verificar en Device Manager
-# Mac: ls /dev/tty.usb*
-```
-
-**Problema:** Estudiantes no responden
-- Verificar mismo canal de radio (7)
-- Hacer descubrimiento nuevamente (Botón A)
-- Revisar baterías de estudiantes
-
-**Problema:** Respuestas no llegan a ClassQuiz
-- Verificar GAME_PIN en proxy.py
-- Ver logs del proxy (debería mostrar "unido al juego ✓")
-- Confirmar que estudiantes estén en "joined_game"
-- **Crítico**: El proxy debe responder a `time_sync` con `echo_time_sync` (ya implementado)
-- Revisar consola de ClassQuiz para ver si aparecen los estudiantes
-
-**Problema:** Timeout en polling
-- Normal si dispositivo está apagado/lejos
-- Se envía respuesta vacía automáticamente
-- ClassQuiz lo marca como "sin respuesta"
+- **Máx ~30 dispositivos:** Limitado por RAM y tiempo de polling
+- **Radio 2.4GHz:** Interferencia con WiFi en mismo canal
+- **Sin encriptación:** Protocolo radio en texto plano
+- **MicroPython:** Sin JSON parsing nativo, parser manual requerido
+- **Display 5×5:** Solo 4 opciones visualizables (A/B/C/D)
 
 ---
 
-## Timing
+## Solución de Problemas
 
-- **Descubrimiento:** ~14 segundos
-- **Votación:** 10 segundos (configurable en proxy.py)
-- **Polling:** ~500ms × N estudiantes + reintentos
-- **Total por pregunta:** ~40s para 30 estudiantes
+### Estudiante no registra
 
----
+1. Verificar radio habilitada: `radio.on()`
+2. Mismo canal radio: `radio.config(channel=7)`
+3. Revisar logs: display muestra "?" hasta ACK
 
-## Persistencia
+### Concentrador no recibe comandos USB
 
-**Estudiantes:**
-- Guardan voto en `voto.cfg` tras cada Botón B
-- Sobrevive a resets durante votación
-- Se borra al recibir nueva pregunta
+1. Puerto correcto: `ls /dev/ttyACM*` (Linux) o Device Manager (Windows)
+2. Baudrate: 115200 default
+3. Revisar parser: buscar keywords, no formato JSON exacto
 
-**Concentrador:**
-- Guarda IDs en `devices.cfg`
-- No necesita descubrimiento en cada reinicio
-- Botón A para forzar redescubrimiento
+### Proxy no conecta Socket.IO
 
----
-
-## Extensiones Futuras
-
-- [ ] Validación de respuestas en proxy
-- [ ] Dashboard web con estado en tiempo real
-- [ ] Timeout configurable por pregunta
-- [ ] Modo offline (sin ClassQuiz)
-- [ ] Feedback visual cuando respuesta es recolectada
-- [ ] Detección automática de puerto serie
-- [ ] Configuración vía archivo JSON
+1. URL ClassQuiz correcta
+2. PIN válido y juego activo
+3. Redis funcional en ClassQuiz backend
 
 ---
 
-## Licencia
+## Créditos y Licencia
 
-GPL v3 - Ver LICENSE
+**Autor del proyecto:** Leandro Batlle (Colegio Nacional de Buenos Aires)  
+**Framework base:** microbitML (Enseñanza ML con micro:bits)  
+**Integración ClassQuiz:** Desarrollo contractual CDIA/Fundación Sadosky  
 
-## Créditos
+**Licencia:** Por definir
 
-Basado en el ecosistema BBC micro:bit y ClassQuiz.
+---
+
+## Soporte
+
+Para reportar bugs o solicitar features, contactar al equipo de desarrollo del proyecto microbitML/ClassQuiz.
+
+**Documentación adicional:**
+- `informe_errores_microbit_uart.md` - Guía de debugging USB/UART
+- `guia_documentacion_microbitml.md` - Estándares de código
+- `MICROBIT_INCOMPATIBILIDADES.md` - Limitaciones MicroPython

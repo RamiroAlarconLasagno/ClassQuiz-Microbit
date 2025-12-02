@@ -1,0 +1,106 @@
+'''Mermaid
+graph TB
+    Start([INICIO])
+    Loop{Loop Principal}
+    
+    Start --> Loop
+    
+    %% Loop principal simple
+    Loop --> CheckPolling{polling_activo?}
+    CheckPolling -->|No| CheckButtons
+    CheckPolling -->|Yes| SkipButtons
+    
+    CheckButtons -->|button_a| Descubrimiento
+    CheckButtons -->|button_b| VerificarEstado
+    CheckButtons -->|none| LeerUSB
+    
+    SkipButtons --> LeerUSB
+    
+    %% Leer USB - SOLO USB
+    LeerUSB[leer_usb<br/>📥 SOLO USB]
+    LeerUSB --> HasData{uart.any?}
+    HasData -->|No| Sleep
+    HasData -->|Yes| ParseCmd[procesar_comando_usb]
+    
+    ParseCmd -->|question_params| BroadcastQ
+    ParseCmd -->|start_poll| HacerPolling
+    ParseCmd -->|unknown| Sleep
+    
+    %% Broadcast QPARAMS - SOLO Radio
+    BroadcastQ[broadcast_qparams<br/>📻 SOLO Radio]
+    BroadcastQ --> TxQParams[radio.send QPARAMS]
+    TxQParams --> NotifyUSB[Notificar USB]
+    NotifyUSB --> Sleep
+    
+    %% Polling - SOLO Radio
+    HacerPolling[hacer_polling<br/>📻 SOLO Radio]
+    HacerPolling --> SetFlag[polling_activo = True]
+    SetFlag --> ForDevices[for device in<br/>dispositivos]
+    
+    ForDevices --> TxPoll[radio.send POLL]
+    TxPoll --> Wait[Esperar 200ms<br/>radio.receive]
+    Wait -->|ANSWER| SendAnswer[Enviar USB]
+    Wait -->|timeout| SendEmpty[Enviar USB vacío]
+    
+    SendAnswer --> NextDev{Más devices?}
+    SendEmpty --> NextDev
+    NextDev -->|Yes| ForDevices
+    NextDev -->|No| ClearFlag[polling_activo = False]
+    ClearFlag --> Sleep
+    
+    %% Descubrimiento - SOLO Radio
+    Descubrimiento[descubrimiento<br/>📻 SOLO Radio]
+    Descubrimiento --> ClearSet[Clear dispositivos]
+    ClearSet --> For6[for 6 rondas]
+    For6 --> TxReport[radio.send REPORT]
+    TxReport --> Listen2s[Listen radio 2s]
+    Listen2s -->|ID recibido| AddDevice[Agregar + ACK]
+    Listen2s -->|timeout| NextRound{Más rondas?}
+    AddDevice --> NextRound
+    NextRound -->|Yes| For6
+    NextRound -->|No| SendList[Enviar lista USB]
+    SendList --> Sleep
+    
+    %% Verificar estado - SOLO Radio
+    VerificarEstado[verificar_estado<br/>📻 SOLO Radio]
+    VerificarEstado --> ForPing[for device]
+    ForPing --> TxPing[radio.send PING]
+    TxPing --> WaitPong[Wait PONG 1s]
+    WaitPong --> SendStatus[Enviar status USB]
+    SendStatus --> MorePing{Más devices?}
+    MorePing -->|Yes| ForPing
+    MorePing -->|No| Sleep
+    
+    Sleep[sleep 50ms]
+    Sleep --> Loop
+    
+    %% Estilos por canal
+    style LeerUSB fill:#d1f2eb,stroke:#27ae60,stroke-width:3px
+    style ParseCmd fill:#d1f2eb
+    style NotifyUSB fill:#d1f2eb
+    style SendAnswer fill:#d1f2eb
+    style SendEmpty fill:#d1f2eb
+    style SendList fill:#d1f2eb
+    style SendStatus fill:#d1f2eb
+    
+    style BroadcastQ fill:#fadbd8,stroke:#e74c3c,stroke-width:3px
+    style HacerPolling fill:#fadbd8,stroke:#e74c3c,stroke-width:3px
+    style Descubrimiento fill:#fadbd8,stroke:#e74c3c,stroke-width:3px
+    style VerificarEstado fill:#fadbd8,stroke:#e74c3c,stroke-width:3px
+    
+    style TxQParams fill:#ffcccc
+    style TxPoll fill:#ffcccc
+    style TxReport fill:#ffcccc
+    style TxPing fill:#ffcccc
+    style Wait fill:#ffcccc
+    style Listen2s fill:#ffcccc
+    style WaitPong fill:#ffcccc
+    
+    style Loop fill:#e8f4f8,stroke:#3498db,stroke-width:2px
+    
+    %% Leyenda
+    subgraph Leyenda
+        L1[📥 Verde = Solo USB]
+        L2[📻 Rojo = Solo Radio]
+        L3[🔵 Azul = Coordinador]
+    end

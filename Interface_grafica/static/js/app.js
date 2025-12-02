@@ -62,18 +62,32 @@ socket.on('pregunta_nueva', (data) => {
 });
 
 socket.on('config_cargada', (data) => {
-    agregarLog('INFO', 'Configuración cargada desde archivos CSV');
-    
+    agregarLog('INFO', 'Configuración cargada desde archivo CSV');
+
     // Actualizar inputs
     if (data.url) document.getElementById('url-input').value = data.url;
     if (data.pin) document.getElementById('pin-input').value = data.pin;
     if (data.timeout) document.getElementById('timeout-input').value = data.timeout;
-    
-    // Actualizar dispositivos
-    if (data.dispositivos) {
-        state.dispositivos = data.dispositivos;
+
+    // Actualizar dispositivos desde alumnos
+    if (data.alumnos && Array.isArray(data.alumnos)) {
+        // Convertir array de alumnos a objeto de dispositivos
+        const nuevosDispositivos = {};
+        data.alumnos.forEach(alumno => {
+            if (alumno.id) {
+                nuevosDispositivos[alumno.id] = {
+                    id: alumno.id,
+                    nombre: alumno.nombre,
+                    estado: alumno.estado || 'offline'
+                };
+            }
+        });
+
+        state.dispositivos = nuevosDispositivos;
         actualizarTablaDispositivos();
         actualizarEstadisticas();
+
+        agregarLog('INFO', `${data.alumnos.length} alumnos cargados en tabla`);
     }
 });
 
@@ -300,36 +314,90 @@ function ocultarPanelPregunta() {
 // EVENT LISTENERS - BOTONES
 // ============================================================================
 
-// Guardar configuración
-document.getElementById('guardar-config-btn').addEventListener('click', async () => {
+// Guardar TODO (configuración + alumnos)
+document.getElementById('guardar-todo-btn').addEventListener('click', async () => {
     const url = document.getElementById('url-input').value.trim();
     const pin = document.getElementById('pin-input').value.trim();
     const timeout = parseInt(document.getElementById('timeout-input').value);
-    
+    const nombreArchivo = document.getElementById('nombre-archivo-input').value.trim();
+
     if (!url || !pin) {
         alert('Por favor completa URL y PIN');
         return;
     }
-    
+
+    if (!nombreArchivo) {
+        alert('Por favor ingresa un nombre para el archivo');
+        return;
+    }
+
     try {
-        const response = await fetch('/api/config', {
+        agregarLog('INFO', `Guardando en archivo: ${nombreArchivo}.csv`);
+
+        const response = await fetch('/api/guardar_todo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, pin, timeout })
+            body: JSON.stringify({
+                url,
+                pin,
+                timeout,
+                nombre_archivo: nombreArchivo,
+                alumnos: Object.entries(state.dispositivos).map(([id, info]) => ({
+                    id: id,
+                    nombre: info.nombre || ''
+                }))
+            })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.status === 'ok') {
-            agregarLog('INFO', 'Configuración guardada correctamente');
-            alert('✅ Configuración guardada');
+            agregarLog('INFO', `✅ Guardado en: ${data.archivo}`);
+            alert(`✅ Guardado exitoso en:\n${data.archivo}\n\nConfig + ${data.alumnos_guardados || 0} alumnos`);
         } else {
             throw new Error(data.error || 'Error desconocido');
         }
     } catch (error) {
-        console.error('Error guardando config:', error);
-        agregarLog('ERROR', `Error guardando configuración: ${error.message}`);
-        alert('❌ Error guardando configuración');
+        console.error('Error guardando:', error);
+        agregarLog('ERROR', `Error guardando: ${error.message}`);
+        alert('❌ Error guardando archivo');
+    }
+});
+
+// Conectar a ClassQuiz
+document.getElementById('conectar-classquiz-btn').addEventListener('click', async () => {
+    agregarLog('INFO', 'Conectando dispositivos a ClassQuiz...');
+
+    // Mostrar estado
+    const statusAlert = document.getElementById('status-conexion-alert');
+    const statusTexto = document.getElementById('status-conexion-texto');
+    statusAlert.classList.remove('d-none');
+    statusTexto.textContent = 'Conectando...';
+
+    try {
+        const response = await fetch('/api/conectar_classquiz', {
+            method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status === 'ok') {
+            agregarLog('INFO', `Conexión iniciada para ${data.count} dispositivo(s)`);
+            statusTexto.textContent = `✅ ${data.count} dispositivo(s) conectándose...`;
+            statusAlert.className = 'alert alert-success mt-3';
+
+            // Ocultar después de 5 segundos
+            setTimeout(() => {
+                statusAlert.classList.add('d-none');
+            }, 5000);
+        } else {
+            throw new Error(data.error || 'Error desconocido');
+        }
+    } catch (error) {
+        console.error('Error conectando a ClassQuiz:', error);
+        agregarLog('ERROR', `Error conectando a ClassQuiz: ${error.message}`);
+        statusTexto.textContent = `❌ ${error.message}`;
+        statusAlert.className = 'alert alert-danger mt-3';
     }
 });
 
@@ -357,61 +425,37 @@ document.getElementById('descubrir-btn').addEventListener('click', async () => {
 
 // Cargar configuración
 document.getElementById('cargar-config-btn').addEventListener('click', async () => {
-    agregarLog('INFO', 'Cargando configuración desde archivos...');
-    
+    const nombreArchivo = document.getElementById('nombre-archivo-input').value.trim();
+
+    if (!nombreArchivo) {
+        alert('Por favor ingresa el nombre del archivo a cargar');
+        return;
+    }
+
+    agregarLog('INFO', `Cargando desde archivo: ${nombreArchivo}.csv`);
+
     try {
         const response = await fetch('/api/cargar_config', {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                nombre_archivo: nombreArchivo
+            })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.status === 'ok') {
-            agregarLog('INFO', 'Configuración cargada exitosamente');
+            agregarLog('INFO', `✅ Cargado desde: ${data.archivo}`);
+            agregarLog('INFO', `Config cargada + ${data.alumnos_cargados || 0} alumnos`);
+            alert(`✅ Archivo cargado:\n${data.archivo}\n\nConfig + ${data.alumnos_cargados || 0} alumnos`);
         } else {
             throw new Error(data.error || 'Error desconocido');
         }
     } catch (error) {
         console.error('Error cargando config:', error);
-        agregarLog('ERROR', `Error cargando configuración: ${error.message}`);
-    }
-});
-
-// Guardar alumnos
-document.getElementById('guardar-alumnos-btn').addEventListener('click', async () => {
-    const alumnos = [];
-    
-    Object.entries(state.dispositivos).forEach(([device_id, info]) => {
-        alumnos.push({
-            device_id: device_id,
-            nombre: info.nombre || ''
-        });
-    });
-    
-    if (alumnos.length === 0) {
-        alert('No hay dispositivos para guardar');
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/alumnos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ alumnos })
-        });
-        
-        const data = await response.json();
-        
-        if (data.status === 'ok') {
-            agregarLog('INFO', `Guardados ${alumnos.length} alumnos en CSV`);
-            alert('✅ Alumnos guardados');
-        } else {
-            throw new Error(data.error || 'Error desconocido');
-        }
-    } catch (error) {
-        console.error('Error guardando alumnos:', error);
-        agregarLog('ERROR', `Error guardando alumnos: ${error.message}`);
-        alert('❌ Error guardando alumnos');
+        agregarLog('ERROR', `Error cargando: ${error.message}`);
+        alert(`❌ Error cargando archivo:\n${error.message}`);
     }
 });
 

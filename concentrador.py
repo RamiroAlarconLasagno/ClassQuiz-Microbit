@@ -280,7 +280,15 @@ def procesar_comando_usb(linea):
         elif 'start_poll' in linea:
             enviar_por_usb('{"type":"debug","msg":"Detectado:start_poll"}')
             hacer_polling()
-        
+
+        elif 'start_discovery' in linea:
+            enviar_por_usb('{"type":"debug","msg":"Detectado:start_discovery"}')
+            descubrimiento()
+
+        elif 'ping_all' in linea:
+            enviar_por_usb('{"type":"debug","msg":"Detectado:ping_all"}')
+            verificar_estado()
+
         else:
             enviar_por_usb('{"type":"debug","msg":"Comando_no_reconocido"}')
     

@@ -64,6 +64,104 @@ def get_config():
         })
 
 
+@app.route('/api/guardar_todo', methods=['POST'])
+def guardar_todo():
+    """Guardar configuración y alumnos en un único archivo CSV"""
+    try:
+        data = request.json
+
+        with estado_lock:
+            # Validar datos de configuración
+            url = data.get('url', estado['url_classquiz'])
+            if not utils.validar_url(url):
+                return jsonify({'error': 'URL inválida'}), 400
+
+            pin = data.get('pin', estado['game_pin'])
+            if not utils.validar_pin(pin):
+                return jsonify({'error': 'PIN inválido'}), 400
+
+            timeout = int(data.get('timeout', estado['timeout_votacion']))
+            if timeout < 5 or timeout > 300:
+                return jsonify({'error': 'Timeout debe estar entre 5 y 300 segundos'}), 400
+
+            # Actualizar estado
+            estado['url_classquiz'] = url
+            estado['game_pin'] = pin
+            estado['timeout_votacion'] = timeout
+
+            # Obtener alumnos y nombre de archivo
+            alumnos_data = data.get('alumnos', [])
+            estado['alumnos'] = alumnos_data
+            nombre_archivo = data.get('nombre_archivo', 'config_default')
+
+        # Sanitizar nombre de archivo (remover caracteres peligrosos)
+        nombre_archivo = ''.join(c for c in nombre_archivo if c.isalnum() or c in ('_', '-'))
+        archivo_path = os.path.join('data', f'{nombre_archivo}.csv')
+
+        print(f"[Flask] Guardando configuración: URL={url}, PIN={pin}, Timeout={timeout}")
+        print(f"[Flask] Guardando {len(alumnos_data)} alumnos")
+        print(f"[Flask] Archivo destino: {archivo_path}")
+
+        # Crear directorio data si no existe
+        utils.crear_directorio_data()
+
+        # Guardar en archivo CSV único con formato especial
+        with open(archivo_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+
+            # Sección de configuración
+            writer.writerow(['[CONFIGURACION]'])
+            writer.writerow(['url', url])
+            writer.writerow(['game_pin', pin])
+            writer.writerow(['timeout_votacion', timeout])
+            writer.writerow(['puerto_serie', estado['puerto_nombre'] or ''])
+
+            # Línea vacía como separador
+            writer.writerow([])
+
+            # Sección de alumnos
+            writer.writerow(['[ALUMNOS]'])
+            writer.writerow(['device_id', 'nombre_alumno'])
+
+            alumnos_guardados = 0
+            for alumno in alumnos_data:
+                writer.writerow([
+                    alumno.get('id', ''),
+                    alumno.get('nombre', '')
+                ])
+                alumnos_guardados += 1
+
+        print(f"[Flask] ✅ Archivo guardado: {archivo_path}")
+        print(f"[Flask] ✅ Config + {alumnos_guardados} alumnos")
+
+        # Notificar a clientes web
+        socketio.emit('log', {
+            'nivel': 'INFO',
+            'msg': f"✅ Guardado en: {archivo_path}",
+            'timestamp': utils.timestamp()
+        })
+
+        return jsonify({
+            'status': 'ok',
+            'archivo': archivo_path,
+            'config_guardada': True,
+            'alumnos_guardados': alumnos_guardados
+        })
+
+    except Exception as e:
+        print(f"[Flask] Error guardando: {e}")
+        import traceback
+        traceback.print_exc()
+
+        socketio.emit('log', {
+            'nivel': 'ERROR',
+            'msg': f"Error guardando: {str(e)}",
+            'timestamp': utils.timestamp()
+        })
+
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/config', methods=['POST'])
 def set_config():
     """Actualizar configuración y guardar en CSV"""
@@ -98,8 +196,8 @@ def set_config():
             'msg': 'Configuración actualizada correctamente',
             'timestamp': utils.timestamp()
         })
-        
-        return jsonify({'success': True})
+
+        return jsonify({'status': 'ok'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -129,8 +227,8 @@ def descubrir_dispositivos():
             'msg': 'Descubrimiento de dispositivos iniciado',
             'timestamp': utils.timestamp()
         })
-        
-        return jsonify({'success': True})
+
+        return jsonify({'status': 'ok'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -170,76 +268,211 @@ def guardar_alumnos():
             'msg': f"Lista de alumnos guardada ({len(estado['alumnos'])} registros)",
             'timestamp': utils.timestamp()
         })
-        
-        return jsonify({'success': True})
+
+        return jsonify({'status': 'ok'})
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/cargar_config', methods=['POST'])
-def cargar_configuracion():
-    """Cargar config.csv y alumnos.csv"""
+@app.route('/api/conectar_classquiz', methods=['POST'])
+def conectar_classquiz():
+    """Conectar todos los dispositivos detectados a ClassQuiz"""
     try:
-        config_cargada = {}
-        alumnos_cargados = []
-        
-        # Cargar configuración
-        config_data = utils.leer_csv_config()
-        if config_data:
-            with estado_lock:
-                estado['url_classquiz'] = config_data.get('url', estado['url_classquiz'])
-                estado['game_pin'] = config_data.get('game_pin', estado['game_pin'])
-                estado['timeout_votacion'] = int(config_data.get('timeout_votacion', estado['timeout_votacion']))
-            
-            config_cargada = {
-                'url': estado['url_classquiz'],
-                'pin': estado['game_pin'],
-                'timeout': estado['timeout_votacion']
-            }
-        
-        # Cargar alumnos
-        alumnos_data = utils.leer_csv_alumnos()
-        if alumnos_data:
-            alumnos_cargados = [
-                {
-                    'id': a.get('device_id', ''),
-                    'nombre': a.get('nombre_alumno', ''),
-                    'estado': 'offline'
-                }
-                for a in alumnos_data
-            ]
-            
-            with estado_lock:
-                estado['alumnos'] = alumnos_cargados
-                
-                # Actualizar dispositivos conocidos
-                for alumno in alumnos_cargados:
-                    if alumno['id']:
-                        if alumno['id'] not in estado['dispositivos']:
-                            estado['dispositivos'][alumno['id']] = {
-                                'id': alumno['id'],
-                                'nombre': alumno['nombre'],
-                                'estado': 'registrado'
-                            }
-        
-        # Emitir evento de carga completa
-        socketio.emit('config_cargada', {
-            'config': config_cargada,
-            'alumnos': alumnos_cargados
-        })
-        
+        with estado_lock:
+            num_dispositivos = len(estado['dispositivos'])
+            url = estado['url_classquiz']
+            pin = estado['game_pin']
+            dispositivos_list = list(estado['dispositivos'].items())
+
+        print("=" * 80)
+        print("[Flask] INICIANDO CONEXIÓN A CLASSQUIZ")
+        print("=" * 80)
+        print(f"[Flask] URL ClassQuiz: {url}")
+        print(f"[Flask] Game PIN: {pin}")
+        print(f"[Flask] Total dispositivos: {num_dispositivos}")
+        print("-" * 80)
+        print("[Flask] LISTA DE ALUMNOS A CONECTAR:")
+        for idx, (dev_id, info) in enumerate(dispositivos_list, 1):
+            nombre = info.get('nombre', f'Sin nombre ({dev_id[:8]})')
+            print(f"[Flask]   {idx}. {nombre}")
+            print(f"[Flask]      Device ID: {dev_id}")
+        print("=" * 80)
+
+        if num_dispositivos == 0:
+            socketio.emit('log', {
+                'nivel': 'ERROR',
+                'msg': 'No hay dispositivos detectados. Presiona "Descubrir" primero.',
+                'timestamp': utils.timestamp()
+            })
+            return jsonify({'error': 'No hay dispositivos detectados'}), 400
+
+        # Validar configuración
+        if not url or not pin:
+            socketio.emit('log', {
+                'nivel': 'ERROR',
+                'msg': 'Configure URL y PIN en la pestaña Configuración primero.',
+                'timestamp': utils.timestamp()
+            })
+            return jsonify({'error': 'Configure URL y PIN primero'}), 400
+
+        # Conectar dispositivos
         socketio.emit('log', {
             'nivel': 'INFO',
-            'msg': f"Configuración cargada: {len(alumnos_cargados)} alumnos",
+            'msg': f"Iniciando conexión de {num_dispositivos} dispositivo(s) a {url}...",
             'timestamp': utils.timestamp()
         })
-        
-        return jsonify({'success': True})
-        
-    except FileNotFoundError:
-        return jsonify({'error': 'Archivos de configuración no encontrados'}), 404
+
+        socketio_manager.conectar_todos(estado)
+
+        socketio.emit('log', {
+            'nivel': 'INFO',
+            'msg': f"Comandos de conexión enviados. Verifica logs para confirmar conexiones.",
+            'timestamp': utils.timestamp()
+        })
+
+        return jsonify({'status': 'ok', 'count': num_dispositivos})
+
     except Exception as e:
+        print(f"[Flask] ERROR en conectar_classquiz: {e}")
+        import traceback
+        traceback.print_exc()
+
+        socketio.emit('log', {
+            'nivel': 'ERROR',
+            'msg': f"Error conectando: {str(e)}",
+            'timestamp': utils.timestamp()
+        })
+
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cargar_config', methods=['POST'])
+def cargar_configuracion():
+    """Cargar configuración y alumnos desde un único archivo CSV"""
+    try:
+        data = request.json
+        nombre_archivo = data.get('nombre_archivo', 'config_default')
+
+        # Sanitizar nombre de archivo
+        nombre_archivo = ''.join(c for c in nombre_archivo if c.isalnum() or c in ('_', '-'))
+        archivo_path = os.path.join('data', f'{nombre_archivo}.csv')
+
+        print(f"[Flask] Cargando desde: {archivo_path}")
+
+        if not os.path.exists(archivo_path):
+            error_msg = f"Archivo no encontrado: {archivo_path}"
+            print(f"[Flask] ❌ {error_msg}")
+            socketio.emit('log', {
+                'nivel': 'ERROR',
+                'msg': error_msg,
+                'timestamp': utils.timestamp()
+            })
+            return jsonify({'error': error_msg}), 404
+
+        # Leer archivo CSV con formato especial
+        config_cargada = {}
+        alumnos_cargados = []
+        seccion_actual = None
+
+        with open(archivo_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+
+            for row in reader:
+                if not row or len(row) == 0:
+                    continue
+
+                # Detectar secciones
+                if row[0] == '[CONFIGURACION]':
+                    seccion_actual = 'config'
+                    print(f"[Flask] Leyendo sección [CONFIGURACION]")
+                    continue
+                elif row[0] == '[ALUMNOS]':
+                    seccion_actual = 'alumnos'
+                    print(f"[Flask] Leyendo sección [ALUMNOS]")
+                    continue
+
+                # Procesar según sección
+                if seccion_actual == 'config' and len(row) >= 2:
+                    key = row[0]
+                    value = row[1]
+                    config_cargada[key] = value
+                    print(f"[Flask]   {key}: {value}")
+
+                elif seccion_actual == 'alumnos' and len(row) >= 2:
+                    # Saltar header
+                    if row[0] == 'device_id':
+                        continue
+
+                    device_id = row[0]
+                    nombre = row[1]
+
+                    if device_id:
+                        alumnos_cargados.append({
+                            'id': device_id,
+                            'nombre': nombre,
+                            'estado': 'offline'
+                        })
+                        print(f"[Flask]   Alumno: {nombre} ({device_id[:8]})")
+
+        print(f"[Flask] ✅ Config cargada: {len(config_cargada)} parámetros")
+        print(f"[Flask] ✅ Alumnos cargados: {len(alumnos_cargados)}")
+
+        # Actualizar estado global
+        with estado_lock:
+            if 'url' in config_cargada:
+                estado['url_classquiz'] = config_cargada['url']
+            if 'game_pin' in config_cargada:
+                estado['game_pin'] = config_cargada['game_pin']
+            if 'timeout_votacion' in config_cargada:
+                estado['timeout_votacion'] = int(config_cargada['timeout_votacion'])
+
+            estado['alumnos'] = alumnos_cargados
+
+            # Actualizar dispositivos conocidos
+            for alumno in alumnos_cargados:
+                if alumno['id']:
+                    estado['dispositivos'][alumno['id']] = {
+                        'id': alumno['id'],
+                        'nombre': alumno['nombre'],
+                        'estado': 'registrado'
+                    }
+
+        # Emitir evento de carga completa
+        socketio.emit('config_cargada', {
+            'url': config_cargada.get('url', ''),
+            'pin': config_cargada.get('game_pin', ''),
+            'timeout': config_cargada.get('timeout_votacion', 30),
+            'alumnos': alumnos_cargados
+        })
+
+        socketio.emit('log', {
+            'nivel': 'INFO',
+            'msg': f"✅ Cargado: {archivo_path} ({len(alumnos_cargados)} alumnos)",
+            'timestamp': utils.timestamp()
+        })
+
+        return jsonify({
+            'status': 'ok',
+            'archivo': archivo_path,
+            'alumnos_cargados': len(alumnos_cargados)
+        })
+
+    except FileNotFoundError:
+        error_msg = f"Archivo no encontrado: {archivo_path}"
+        print(f"[Flask] ❌ {error_msg}")
+        return jsonify({'error': error_msg}), 404
+    except Exception as e:
+        print(f"[Flask] Error cargando: {e}")
+        import traceback
+        traceback.print_exc()
+
+        socketio.emit('log', {
+            'nivel': 'ERROR',
+            'msg': f"Error cargando: {str(e)}",
+            'timestamp': utils.timestamp()
+        })
+
         return jsonify({'error': str(e)}), 500
 
 
@@ -460,9 +693,8 @@ def procesar_device_list(data):
         'msg': f"Descubrimiento completo: {len(devices)} dispositivo(s)",
         'timestamp': utils.timestamp()
     })
-    
-    # Conectar dispositivos a ClassQuiz
-    socketio_manager.conectar_todos(estado)
+
+    # NOTA: La conexión a ClassQuiz ahora es manual mediante el botón "Conectar a ClassQuiz"
 
 
 def procesar_answer(data):
